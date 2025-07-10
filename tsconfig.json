@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",                        // لتوليد كود حديث
+    "module": "CommonJS",                      // لأن Node يستخدم CommonJS
+    "rootDir": "src",                          // مصدر ملفات TypeScript
+    "outDir": "dist",                          // مكان إخراج ملفات JavaScript
+    "strict": true,                            // تفعيل الفحص الصارم للأنواع
+    "esModuleInterop": true,                   // لدعم import من مكتبات CommonJS
+    "forceConsistentCasingInFileNames": true,  // لمنع الأخطاء الناتجة من أسماء ملفات حساسة لحالة الأحرف
+    "skipLibCheck": true                       // لتجاهل فحص ملفات التعريف في node_modules
+  },
+  "include": ["src"],                          // الملفات اللي هيتعامل معاها TypeScript
+  "exclude": ["node_modules"]                  // تجاهل مجلد node_modules
+}
