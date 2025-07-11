@@ -42,6 +42,14 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
+app.get('/', (req: Request, res: Response) => {
+  res.json({ 
+    message: 'Hotel Booking API is working!',
+    env: process.env.NODE_ENV,
+    port: port
+  });
+});
+
 app.get('/success', (req:Request, res:Response) => {
   res.send(' الدفع تم بنجاح! شكراً ليك.');
 });
@@ -65,8 +73,10 @@ app.use((error: any, req: Request, res: Response, next: NextFunction) => {
   });
 });
 
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-});
+if (require.main === module) {
+  app.listen(port, () => {
+    console.log(`Server running on port ${port}`);
+  });
+}
 
 export default app;
