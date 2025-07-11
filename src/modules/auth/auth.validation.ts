@@ -1,4 +1,4 @@
-import Joi from "Joi";
+import Joi from "joi";
 
 export const register = Joi.object({
   userName: Joi.string().min(3).max(20).required(),

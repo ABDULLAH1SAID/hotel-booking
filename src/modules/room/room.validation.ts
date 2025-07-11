@@ -1,4 +1,4 @@
-import Joi from "Joi"
+import Joi from "joi"
 import { RoomType } from "../../types/room.interfaces"
 import { isValidObjectId } from "mongoose";
 
