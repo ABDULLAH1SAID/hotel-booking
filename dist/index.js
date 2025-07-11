@@ -18,7 +18,7 @@ const Booking_route_1 = __importDefault(require("./modules/Booking/Booking.route
 const webhook_route_1 = __importDefault(require("./modules/webhook/webhook.route"));
 dotenv_1.default.config();
 const port = process.env.PORT ? Number(process.env.PORT) : 5000;
-const app = (0, express_1.default)();
+const app = require('./dist/index.js').default;
 (0, connect_1.default)();
 // Importing the webhook router
 app.use('/webhook', webhook_route_1.default);
@@ -59,3 +59,5 @@ app.use((error, req, res, next) => {
 app.listen(port, () => {
     console.log(`Server running on port ${port}`);
 });
+
+module.exports = app;
