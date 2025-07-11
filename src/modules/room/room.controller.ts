@@ -75,7 +75,7 @@ export const getRooms = asyncHandler(async (req: Request<{}, {}, {}, RoomQueryPa
 
   const rooms = await Room.find(filters)
     .sort({ createdAt: -1 })
-    .paginate(page, limit);
+    // .paginate(page, limit);
 
   const totalRooms = await Room.countDocuments(filters);
   const totalPages = Math.ceil(totalRooms / limit);
