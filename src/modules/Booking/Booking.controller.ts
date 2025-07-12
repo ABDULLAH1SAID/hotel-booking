@@ -57,8 +57,8 @@ export const createBooking = asyncHandler(async (req: AuthenticatedRequest, res:
   const session = await stripe.checkout.sessions.create({
     payment_method_types: ["card"],
     mode: "payment",
-    success_url: `http://localhost:3000/success`,
-    cancel_url: `http://localhost:3000/cancel`,
+    success_url: `https://hotel-booking-a4dr.vercel.app/success`,
+    cancel_url: `https://hotel-booking-a4dr.vercel.app/cancel`,
     line_items: [
       {
         price_data: {

@@ -34,7 +34,7 @@ export const register = asyncHandler(async (req: Request, res: Response, next: N
     email,
     password,
   });
-    const confirmationlink =`http://localhost:3000/auth/activate_account/${token}`
+    const confirmationlink =`https://hotel-booking-a4dr.vercel.app/auth/activate_account/${token}`
 
     const messageSent = await sendEmail({to:email,subject:"Activated Account",html:signUpTemplate(confirmationlink)});
     if(!messageSent) return next(new AppError("something went wrong!",500))
