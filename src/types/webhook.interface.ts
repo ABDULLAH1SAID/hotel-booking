@@ -5,3 +5,5 @@ export interface WebhookEvent {
     checkOutDate: string;
     totalPrice: string;
 };
+
+export type BookingStatus = 'pending' | 'confirmed' | 'cancelled';

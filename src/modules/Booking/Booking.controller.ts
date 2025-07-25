@@ -116,7 +116,7 @@ export const cancelBooking = asyncHandler(async (req: AuthenticatedRequest, res:
   // Cancel the Stripe Checkout session
   const refund = await stripe.refunds.create({
     payment_intent: booking.paymentIntentId,
-    amount: booking.totalPrice, 
+    amount: booking.totalPrice *100, // Convert to cents
   });
   // Check if the refund was successful
   if (!refund) {  
@@ -225,11 +225,14 @@ export const updateBooking = asyncHandler(async (req:AuthenticatedRequest, res:R
          },
        ],
        metadata: {
+         bookingId: id.toString(),
          userId: user.toString(),
          roomId: room.toString(),
          checkInDate: checkInDate.toString(),
          checkOutDate: checkOutDate.toString(),
          totalPrice: totalPrice.toString(),
+         paymentIntentId: booking.paymentIntentId.toString(),
+        
        },
      });
 
@@ -239,20 +242,65 @@ export const updateBooking = asyncHandler(async (req:AuthenticatedRequest, res:R
     });
   }
 
-   if( totalPrice < totalPrice2) {
-     const stripe = new Stripe(process.env.STRIPE_KEY as string);
-     const refund = await stripe.refunds.create({
-       payment_intent: booking.paymentIntentId,
-       amount: (totalPrice2 - totalPrice) * 100,
-     });
-     if (!refund || refund.status !== "succeeded") {
-      return next(new AppError("Failed to process refund. Please try again later.", 500));
-     }
-   }
+   if (totalPrice < totalPrice2) {
+  const stripe = new Stripe(process.env.STRIPE_KEY as string);
 
-   return res.status(200).json({
+  const refund = await stripe.refunds.create({
+    payment_intent: booking.paymentIntentId,
+    amount: (totalPrice2 - totalPrice) * 100,
+    metadata: {
+      bookingId: id.toString(),
+      userId: user.toString(),
+      roomId: room.toString(),
+      checkInDate: checkInDate.toString(),
+      checkOutDate: checkOutDate.toString(),
+      totalPrice: totalPrice.toString()
+    }
+  });
+
+  if (!refund || refund.status !== "succeeded") {
+    return next(new AppError("Failed to process refund. Please try again later.", 500));
+  }
+  return res.status(200).json({
      success: true,
+     message: "Refund processed successfully",
      data: null,
   });
+ }
+
+ else{
+  const oldRoomId = booking.room.toString();
+  const userCheckInDate = booking.checkInDate;
+  const userCheckOutDate = booking.checkOutDate;
+
+  booking.checkInDate = new Date(checkInDate);
+  booking.checkOutDate = new Date(checkOutDate);
+  booking.totalPrice = totalPrice;
+  booking.room = room;
+  await booking.save();
+
+  const oldRoom = await Room.findById(oldRoomId);
+  if (oldRoom) {
+    oldRoom.bookedDates = oldRoom.bookedDates.filter(date =>
+      !(new Date(date.checkIn).getTime() === new Date(userCheckInDate).getTime() &&
+        new Date(date.checkOut).getTime() === new Date(userCheckOutDate).getTime())
+    );
+    await oldRoom.save();
+  }
+
+  const newRoom = await Room.findById(room);
+  if (newRoom) {
+    newRoom.bookedDates.push({
+      checkIn: new Date(checkInDate),
+      checkOut: new Date(checkOutDate),
+    });
+    await newRoom.save();
+  }
+
+  return res.status(200).json({
+    success: true,
+    message: "Booking updated successfully with no price change.",
+  });
+}
 
 });
