@@ -6,8 +6,18 @@ async function connectDB(): Promise<void> {
       console.log('CONNECTION_URL not found in environment variables');
       return; // مش هنخرج من العملية
     }
+    const options = {
+      serverSelectionTimeoutMS: 30000,
+      socketTimeoutMS: 45000,
+      connectTimeoutMS: 30000,
+      maxPoolSize: 10,
+      minPoolSize: 2,
+      maxIdleTimeMS: 30000,
+      bufferCommands: false,
+      bufferMaxEntries: 0,
+    };
     
-    await mongoose.connect(process.env.CONNECTION_URL as string);
+    await mongoose.connect(process.env.CONNECTION_URL as string, options);
     console.log('Connected to MongoDB successfully');
   } catch (error) {
     console.error('MongoDB connection error:', error);

@@ -65,8 +65,7 @@ export const addBookedDatesToRoom = async (roomId: string, checkIn: Date, checkO
     throw error;
   }    
   }
-  
-  
+
 
 // Helper function لتحديث الحجز
 export const updateBookingDetails = async (bookingId: string,userId: string,roomId: string, checkInDate: string,
