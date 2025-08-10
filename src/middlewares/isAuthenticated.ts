@@ -18,11 +18,14 @@ export const isAuthenticated = asyncHandler(async (req: AuthenticatedRequest, re
     if (!token) {
             return next(new AppError("valid Token is required", 404));
         }
-    // verfiy Token 
-    const decoded = Jwt.verify(token, process.env.TOKEN_SECRET as string) as JwtPayload;
-    if (!decoded) {
-            return next(new AppError("invalid token", 401));
-        }
+
+    
+    let decoded: JwtPayload;
+    try {
+    decoded = Jwt.verify(token, process.env.TOKEN_SECRET as string) as JwtPayload;
+    } catch (error) {
+    return next(new AppError("invalid token", 401));    
+    }
 
     const tokenDoc = await Token.findOne({  token, isValid: true, });
     if (!tokenDoc) return next(new AppError ("Token is invalid!", 401));

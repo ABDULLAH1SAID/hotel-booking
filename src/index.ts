@@ -19,7 +19,6 @@ const app = express();
 
 connectDB()
 
-// Importing the webhook router
 app.use('/webhook', webhookRouter)
 
 app.use(express.json())

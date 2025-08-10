@@ -7,9 +7,8 @@ import { AppError } from "../../utils/appError";
 import {BookingStatus} from "../../types/webhook.interface"
 
 const stripe = new Stripe(process.env.STRIPE_KEY as string);
-const endPoint = process.env.STRIPE_WEBHOOK_SECRET;
 
-export const constructWebhookEvent = (req: Request, next:NextFunction):Stripe.Event => {
+export const constructWebhookEvent =  (req: Request, next:NextFunction, endPoint: any):Stripe.Event => {
   const sig = req.headers["stripe-signature"];
   try {
     return stripe.webhooks.constructEvent(req.body, sig as string, endPoint as string);

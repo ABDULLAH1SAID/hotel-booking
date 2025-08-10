@@ -1,25 +1,16 @@
 import { Booking } from "../../DB/models/Booking.model";
 import { Room } from "../../DB/models/room.model";
 import  { NextFunction, Request, Response } from "express";
+import { AppError } from "../../utils/appError";
 import Stripe from "stripe";
 import { asyncHandler } from "../../utils/asyncHandler";
-import { AppError } from "../../utils/appError";
 import { constructWebhookEvent, addBookedDatesToRoom, removeBookedDatesFromRoom, updateBookingDetails } from "./webhook.services";
-import mongoose from "mongoose";
 
-const stripe = new Stripe(process.env.STRIPE_KEY as string);
-const endPoint = process.env.STRIPE_WEBHOOK_SECRET;
 
 export const mainWebhook = asyncHandler(async (req: Request, res: Response, next:NextFunction) => {
-  // const sig = req.headers["stripe-signature"];
-  // let event;
-  // try {
-  //   event = stripe.webhooks.constructEvent(req.body, sig as string, endPoint as string);
-  // } catch (err) {
-  //   console.error("❌ Webhook signature verification failed:", err);
-  //   return res.status(400).send("Webhook signature verification failed");
-  // }  
-    const event = constructWebhookEvent(req, next)
+  const endPoint = process.env.MAIN_STRIPE_WEBHOOK_SECRET;
+
+    const event = constructWebhookEvent(req, next, endPoint);
 
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
@@ -61,14 +52,8 @@ export const mainWebhook = asyncHandler(async (req: Request, res: Response, next
 
       await addBookedDatesToRoom(roomId, checkIn, checkOut);
 
-      // room.bookedDates.push({
-      //   checkIn,
-      //   checkOut,
-      // });
-      // await room.save();
-
-      // booking.status = "confirmed"; 
-      // await booking.save();
+       booking.status = "confirmed"; 
+       await booking.save();
 
       console.log("✅ Booking created successfully:", booking._id);
   }
@@ -102,157 +87,134 @@ export const mainWebhook = asyncHandler(async (req: Request, res: Response, next
       );
 
       console.log("✅ Booking cancelled and dates removed successfully:", booking._id);
-
-      // const room = await Room.findById(booking.room);
-      // if (!room) {
-      //   console.error("❌ Room not found for booking.");
-      //   return res.status(404).end();
-      // }
-
-      // room.bookedDates = room.bookedDates.filter((date) => {
-      //   return !(new Date(date.checkIn).getTime() === new Date(booking.checkInDate).getTime() &&
-      //            new Date(date.checkOut).getTime() === new Date(booking.checkOutDate).getTime());
-      // });
-      // await room.save();
     }
    res.status(200).end();
 });
 
 
-export const updateWebhook  = asyncHandler(async (req: Request, res: Response, next:NextFunction) => {
-  // const sig = req.headers["stripe-signature"];
+export const updateWebhook = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+  const endPoint = process.env.UPDATE_STRIPE_WEBHOOK_SECRET;
+  
+  try {
+    const event = constructWebhookEvent(req, next, endPoint);
 
-  // let event;
-  // try {
-  //   event = stripe.webhooks.constructEvent(req.body, sig as string, endPoint as string);
-  // } catch (err) {
-  //   console.error("❌ Webhook signature verification failed:", err);
-  //   return res.status(400).send("Webhook signature verification failed");
-  // } 
-    const event = constructWebhookEvent(req, next)
-
+    // معالجة حدث اكتمال الدفع لتحديث الحجز
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
-
       const metadata = session.metadata as {
+        action: string;
         bookingId: string;
         userId: string;
         roomId: string;
-        checkInDate: string;
-        checkOutDate: string;
+        oldRoomId: string;
+        oldCheckIn: string;
+        oldCheckOut: string;
+        newCheckIn: string;
+        newCheckOut: string;
         totalPrice: string;
       };
-    const { bookingId ,userId, roomId, checkInDate, checkOutDate, totalPrice } = metadata;
-    const booking = await Booking.findOne( { _id: bookingId });
-    if (!booking) {
-      return res.status(404).end();
+
+      // التحقق من نوع الإجراء
+      if (metadata.action !== 'booking_update') {
+        console.log('⚠️ Ignoring non-booking-update event');
+        return res.status(200).json({ success: true });
+      }
+
+      // التحقق من وجود الحجز
+      const booking = await Booking.findById(metadata.bookingId);
+      if (!booking) {
+        console.error(`❌ Booking not found: ${metadata.bookingId}`);
+        return res.status(404).json({ success: false, message: "Booking not found" });
+      }
+
+      // التحقق من أن الحجز في حالة انتظار
+      if (booking.status !== "pending") {
+        console.error(`❌ Booking not in pending state: ${booking.status}`);
+        return res.status(400).json({ success: false, message: "Invalid booking state" });
+      }
+
+      try {
+        // 1. إزالة التواريخ القديمة من الغرفة القديمة
+        await removeBookedDatesFromRoom(
+          metadata.oldRoomId,
+          new Date(metadata.oldCheckIn),
+          new Date(metadata.oldCheckOut)
+        );
+
+        // 2. تحديث بيانات الحجز
+        await updateBookingDetails(
+          metadata.bookingId,
+          metadata.userId,
+          metadata.roomId,
+          metadata.newCheckIn,
+          metadata.newCheckOut,
+          metadata.totalPrice,
+          session.payment_intent as string,
+          "confirmed"
+        );
+
+        console.log(`✅ Booking ${metadata.bookingId} updated successfully`);
+        return res.status(200).json({ success: true });
+        
+      } catch (updateError) {
+        console.error('❌ Update failed, reverting changes:', updateError);
+        
+        // محاولة استعادة الحجز لحالته الأصلية
+        try {
+          await Booking.findByIdAndUpdate(metadata.bookingId, { status: "cancelled" });
+        } catch (revertError) {
+          console.error('❌ Failed to revert booking:', revertError);
+        }
+        
+        return res.status(500).json({ success: false, message: "Failed to process update" });
+      }
     }
-    const paymentIntentId = session.payment_intent as string;
 
+    // معالجة حدث رد الأموال
+    if (event.type === "charge.refunded") {
+      const charge = event.data.object as Stripe.Charge;
+      const metadata = charge.metadata as {
+        action: string;
+        bookingId: string;
+        userId: string;
+        roomId: string;
+        oldRoomId: string;
+        oldCheckIn: string;
+        oldCheckOut: string;
+        newCheckIn: string;
+        newCheckOut: string;
+        priceDifference: string;
+        totalPrice: string;
+      };
 
-    await updateBookingDetails(bookingId ,userId, roomId, checkInDate, checkOutDate, totalPrice, paymentIntentId, "confirmed");
+      if (metadata.action !== 'booking_update_refund') {
+        return res.status(200).json({ success: true });
+      }
 
-  //   const oldRoomId = booking.room.toString();
-  //   const oldCheckIn = booking.checkInDate;
-  //   const oldCheckOut = booking.checkOutDate;
-    
-  //   booking.checkInDate = new Date(checkInDate);
-  //   booking.checkOutDate = new Date(checkOutDate);
-  //   booking.totalPrice = Number(totalPrice);
-  //   booking.paymentIntentId = session.payment_intent as string;
-  //   booking.room = new mongoose.Types.ObjectId(roomId);
-  //   booking.user = new mongoose.Types.ObjectId(userId);
-  //   booking.status = "confirmed";
-  //   await booking.save();
+      try {
+        await Booking.findByIdAndUpdate(
+          metadata.bookingId,
+          {
+            $inc: { totalPrice: -Number(metadata.priceDifference) },
+            paymentIntentId: charge.payment_intent
+          }
+        );
 
-  // const oldRoom = await Room.findById(oldRoomId);
-  //   if (oldRoom) {
-  //     oldRoom.bookedDates = oldRoom.bookedDates.filter(date =>
-  //       !(
-  //         new Date(date.checkIn).getTime() === new Date(oldCheckIn).getTime() &&
-  //         new Date(date.checkOut).getTime() === new Date(oldCheckOut).getTime()
-  //       )
-  //     );
-  //     await oldRoom.save();
-  //   }
+        console.log(`✅ Refund processed for booking ${metadata.bookingId}`);
+        return res.status(200).json({ success: true });
+        
+      } catch (error) {
+        console.error('❌ Refund processing failed:', error);
+        return res.status(500).json({ success: false, message: "Failed to process refund" });
+      }
+    }
 
-  //   const newRoom = await Room.findById(roomId);
-  //   if (newRoom) {
-  //     newRoom.bookedDates.push({
-  //       checkIn: new Date(checkInDate),
-  //       checkOut: new Date(checkOutDate),
-  //     });
-  //     await newRoom.save();
-  //   }
-    console.log("✅ Booking updated successfully:");
-    return res.status(200).json({
-      success: true,
-      message: "Webhook processed successfully and booking updated., and your payment has been confirmed",
-    });
-  }
-   if (event.type === "charge.refunded") {
-   const charge = event.data.object as Stripe.Charge;
-   const paymentIntentId = charge.payment_intent as string;
-    if (!paymentIntentId) {
-      console.error("❌ Missing paymentIntentId in refund event.");
-      return res.status(400).end();
-   }
-    const metadata = charge.metadata as {
-      bookingId: string;
-      userId: string;
-      roomId: string;
-      checkInDate: string;
-      checkOutDate: string;
-      totalPrice: string;
-    };
-    const { bookingId ,userId, roomId, checkInDate, checkOutDate, totalPrice } = metadata;
-  //   const oldRoomId = booking.room.toString();
-  //   const oldCheckIn = booking.checkInDate;
-  //   const oldCheckOut = booking.checkOutDate;
-    
-  //   booking.checkInDate = new Date(checkInDate);
-  //   booking.checkOutDate = new Date(checkOutDate);
-  //   booking.totalPrice = Number(totalPrice);
-  //   booking.paymentIntentId = charge.payment_intent as string;
-  //   booking.room = new mongoose.Types.ObjectId(roomId);
-  //   booking.user = new mongoose.Types.ObjectId(userId);
-  //   booking.status = "confirmed";
-  //   await booking.save();
+    // إذا كان الحدث غير معروف
+    console.log(`⚠️ Unhandled event type: ${event.type}`);
+    return res.status(200).json({ success: true });
 
-  // const oldRoom = await Room.findById(oldRoomId);
-  //   if (oldRoom) {
-  //     oldRoom.bookedDates = oldRoom.bookedDates.filter(date =>
-  //       !(
-  //         new Date(date.checkIn).getTime() === new Date(oldCheckIn).getTime() &&
-  //         new Date(date.checkOut).getTime() === new Date(oldCheckOut).getTime()
-  //       )
-  //     );
-  //     await oldRoom.save();
-  //   }
-
-  //   const newRoom = await Room.findById(roomId);
-  //   if (newRoom) {
-  //     newRoom.bookedDates.push({
-  //       checkIn: new Date(checkInDate),
-  //       checkOut: new Date(checkOutDate),
-  //     });
-  //     await newRoom.save();
-  //   }
-
-  await updateBookingDetails(
-    bookingId,
-    userId,
-    roomId,
-    checkInDate,
-    checkOutDate,
-    totalPrice,
-    paymentIntentId,
-    "cancelled",
-  );
-
-    return res.status(200).json({
-      success: true,
-      message: "Webhook processed successfully and booking updated. and your payment has been refunded",
-    });
+  } catch (error) {
+    console.error('❌ Webhook processing error:', error);
+    return next(new AppError("Webhook processing failed", 500));
   }
 });

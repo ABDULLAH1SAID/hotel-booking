@@ -135,6 +135,8 @@ export const cancelBooking = asyncHandler(async (req: AuthenticatedRequest, res:
 
 });
 
+
+
 export const updateBooking = asyncHandler(async (req:AuthenticatedRequest, res:Response, next:NextFunction)=>{
   const user = req.user._id as string;
   if (!user) {
@@ -172,39 +174,49 @@ export const updateBooking = asyncHandler(async (req:AuthenticatedRequest, res:R
   if (checkInDate >= checkOutDate) {
     return next(new AppError("Check-out date must be after check-in date", 400));
   }
-    const foundRoom = await Room.findById(room);
+  const foundRoom = await Room.findById(room);
   if (!foundRoom) {
     return next(new AppError("Room not found", 404));
   }
   if (!foundRoom.isAvailable) {
     return next(new AppError("Room is not available for booking", 400));
+    }
+  const userCheckInDate = new Date(booking.checkInDate).getTime();
+  const userCheckOutDate = new Date(booking.checkOutDate).getTime();
+
+  const bookedDates = foundRoom.bookedDates.filter(date => {
+    const dateCheckIn = new Date(date.checkIn).getTime();
+    const dateCheckOut = new Date(date.checkOut).getTime();
+
+    return !(dateCheckIn === userCheckInDate && dateCheckOut === userCheckOutDate);
+  });
+
+  const checkIn = new Date(checkInDate);
+  const checkOut = new Date(checkOutDate);
+
+  const isBooked = bookedDates.some(date => {
+    const existingCheckIn = new Date(date.checkIn);
+    const existingCheckOut = new Date(date.checkOut);
+
+    return (
+      (checkIn >= existingCheckIn && checkIn < existingCheckOut) ||
+      (checkOut > existingCheckIn && checkOut <= existingCheckOut) ||
+      (checkIn < existingCheckIn && checkOut > existingCheckOut)
+    );
+  });
+
+  if (isBooked) {
+    return next(new AppError("Room is not available for the selected dates.", 400));
   }
-  const userCheckInDate =  booking.checkInDate;
-  const userCheckOutDate = booking.checkOutDate;
 
-  const bookedDates = foundRoom.bookedDates.filter(
-  date =>
-    !(date.checkIn === userCheckInDate && date.checkOut === userCheckOutDate)
-  );
-
-   const isBooked = bookedDates.some((date) => {
-     return (
-       (new Date(checkInDate) >= new Date(date.checkIn) && new Date(checkInDate) < new Date(date.checkOut)) ||
-       (new Date(checkOutDate) > new Date(date.checkIn) && new Date(checkOutDate) <= new Date(date.checkOut)) ||
-       (new Date(checkInDate) < new Date(date.checkIn) && new Date(checkOutDate) > new Date(date.checkOut)) 
-     );
-
-   });
-
-   if (isBooked) {
-     return next(new AppError("Room is not available for the selected dates.", 400));
-   }
 
    const stayDuration = (new Date(checkOutDate).getTime() - new Date(checkInDate).getTime()) / (1000 * 60 * 60 * 24);
    const totalPrice = stayDuration * foundRoom.pricePerNight;
    const totalPrice2 = booking.totalPrice
 
-   if (totalPrice > totalPrice2) { 
+   if (totalPrice > totalPrice2) {
+     booking.status = "pending";
+     await booking.save();
      const stripe = new Stripe(process.env.STRIPE_KEY as string);
      const session = await stripe.checkout.sessions.create({
        payment_method_types: ["card"],
@@ -225,14 +237,21 @@ export const updateBooking = asyncHandler(async (req:AuthenticatedRequest, res:R
          },
        ],
        metadata: {
+         action: 'booking_update',
+         userId : user.toString(),
+         roomId : room.toString(),
+         checkInDate : checkInDate.toString(),
+         checkOutDate : checkOutDate.toString(),
          bookingId: id.toString(),
-         userId: user.toString(),
-         roomId: room.toString(),
-         checkInDate: checkInDate.toString(),
-         checkOutDate: checkOutDate.toString(),
+       
+         oldRoomId: booking.room.toString(),
+         oldCheckIn: booking.checkInDate.toString(),
+         oldCheckOut: booking.checkOutDate.toString(),
+         newCheckIn: checkInDate.toString(),
+         newCheckOut: checkOutDate.toString(),
+         priceDifference: (totalPrice - totalPrice2).toString(),
          totalPrice: totalPrice.toString(),
          paymentIntentId: booking.paymentIntentId.toString(),
-        
        },
      });
 
@@ -249,14 +268,18 @@ export const updateBooking = asyncHandler(async (req:AuthenticatedRequest, res:R
     payment_intent: booking.paymentIntentId,
     amount: (totalPrice2 - totalPrice) * 100,
     metadata: {
+      action: 'booking_update_refund',
       bookingId: id.toString(),
       userId: user.toString(),
       roomId: room.toString(),
-      checkInDate: checkInDate.toString(),
-      checkOutDate: checkOutDate.toString(),
+      oldRoomId: booking.room.toString(),
+      oldCheckIn: booking.checkInDate.toString(),
+      oldCheckOut: booking.checkOutDate.toString(),
+      newCheckIn: checkInDate.toString(),
+      newCheckOut: checkOutDate.toString(),
+      priceDifference: (totalPrice2 - totalPrice).toString(),
       totalPrice: totalPrice.toString()
-    }
-  });
+  }});
 
   if (!refund || refund.status !== "succeeded") {
     return next(new AppError("Failed to process refund. Please try again later.", 500));
